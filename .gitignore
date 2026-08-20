@@ -1,0 +1,10 @@
+uploads/*
+!uploads/.gitkeep
+outputs/*
+!outputs/clips
+outputs/clips/*
+!outputs/clips/.gitkeep
+__pycache__/
+*.pyc
+.venv/
+venv/
