@@ -1,8 +1,8 @@
+import multiprocessing as mp
 import os
 import queue as queue_module
 from collections import namedtuple
 from concurrent.futures import ProcessPoolExecutor, wait
-from multiprocessing import Manager
 
 import cv2
 
@@ -12,6 +12,16 @@ Detection = namedtuple("Detection", ["frame_time_sec", "match_type", "label", "c
 # worker re-imports cv2/dlib and re-loads reference images) isn't worth it.
 MIN_SAMPLES_PER_WORKER = 20
 MAX_WORKERS = 8
+
+# Force 'fork' where available (Linux/Mac). Under 'spawn' (Windows, or Linux
+# platforms where 'fork' isn't offered), a worker process re-imports whatever
+# module is running as the entry point — when that entry point is a
+# Streamlit app, each worker re-executes the ENTIRE app.py top-level code
+# (Streamlit UI included) from scratch, which is wasteful and, in practice,
+# what was crashing the app under Streamlit Community Cloud. 'fork' just
+# clones the already-running process instead of re-importing anything, so
+# it never hits that path.
+_MP_CONTEXT = mp.get_context("fork") if "fork" in mp.get_all_start_methods() else mp.get_context()
 
 
 class ScannerError(Exception):
@@ -133,10 +143,10 @@ def scan_video(video_path, logo_matchers, face_matchers, sample_fps=1.0, progres
     processed_samples = 0
     detections = []
 
-    with Manager() as manager:
+    with _MP_CONTEXT.Manager() as manager:
         progress_queue = manager.Queue()
 
-        with ProcessPoolExecutor(max_workers=len(chunks)) as executor:
+        with ProcessPoolExecutor(max_workers=len(chunks), mp_context=_MP_CONTEXT) as executor:
             futures = [
                 executor.submit(
                     _scan_frame_range, video_path, logo_matchers, face_matchers,
