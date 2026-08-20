@@ -66,7 +66,7 @@ with st.sidebar:
     gap_tolerance = st.slider("Gap tolerance (sec)", 0, 15, 3, step=1)
     make_clips = st.checkbox("Cut clips for each detection", value=True)
 
-    run_scan = st.button("Run scan", type="primary", use_container_width=True)
+    run_scan = st.button("Run scan", type="primary", width="stretch")
 
 if run_scan:
     if not video_file:
@@ -183,7 +183,7 @@ if st.session_state.results is not None:
             }
             for r in table_rows
         ]
-        st.dataframe(table_data, use_container_width=True, hide_index=True)
+        st.dataframe(table_data, hide_index=True)
 
         st.subheader("Clips")
         for i, r in enumerate(table_rows):
