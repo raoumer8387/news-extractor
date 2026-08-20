@@ -133,6 +133,14 @@ this app.
    `requirements.txt` (`opencv-python-headless`, `numpy`, `streamlit`) on
    deploy. No compile step, so this should be a fast, uneventful build.
 
+**`runtime.txt` pins Python 3.12 — don't remove it.** Without a pin,
+Streamlit Cloud defaults to the newest available Python, and if that's newer
+than what `numpy`/`opencv-python-headless` have published wheels for, pip
+falls back to compiling from source, which can hang for an hour+ (this
+happened in practice on Python 3.14 before this pin was added) and can leave
+a half-installed environment where `import cv2` fails at runtime. 3.12 is
+verified to have prebuilt wheels for every dependency here.
+
 **Known constraints on the free tier** (not fully verifiable without an
 actual deploy — treat as things to check, not guarantees):
 - Community Cloud apps typically get on the order of 1 CPU / 1GB RAM. The
