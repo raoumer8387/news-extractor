@@ -32,7 +32,6 @@ def _probe_video(video_path):
 def _run_matchers(frame, logo_matchers, face_matchers, current_sec):
     detections = []
     frame_gray = None
-    frame_rgb = None
 
     for matcher in logo_matchers:
         if frame_gray is None:
@@ -42,9 +41,9 @@ def _run_matchers(frame, logo_matchers, face_matchers, current_sec):
             detections.append(Detection(current_sec, "logo", matcher.label, confidence))
 
     for matcher in face_matchers:
-        if frame_rgb is None:
-            frame_rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        confidence = matcher.match(frame_rgb)
+        # YuNet/SFace (unlike the previous dlib pipeline) work directly on
+        # OpenCV's native BGR frames — no color conversion needed.
+        confidence = matcher.match(frame)
         if confidence is not None:
             detections.append(Detection(current_sec, "face", matcher.label, confidence))
 

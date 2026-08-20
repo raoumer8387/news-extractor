@@ -6,60 +6,23 @@ reports every time-range where they appear (with a confidence score), and
 generates a downloadable clip for each detection.
 
 Built for a client demo — the detection logic prioritizes working end-to-end
-over top accuracy, but is structured so the logo matcher can be swapped for a
-trained YOLO model later without touching `scanner.py`, `ranges.py`, or the UI.
+over top accuracy, but is structured so either matcher can be swapped for a
+trained model later without touching `scanner.py`, `ranges.py`, or the UI.
 
 ## Prerequisites
 
-- Python 3.12+ (tested on 3.13)
+- Python 3.9+
 - [ffmpeg](https://ffmpeg.org/) installed and on your `PATH` (used to cut clips)
 
 ## Installation
 
-**Do not run `pip install -r requirements.txt` as your first step.**
-`face_recognition` normally pulls in plain `dlib`, which compiles from source
-and can take 10+ minutes or fail entirely if you don't have a full C++ build
-toolchain. Instead, install in this order (a script is provided):
-
-```powershell
-# Windows
-.\install.ps1
-```
-
 ```bash
-# macOS / Linux
-./install.sh
+pip install -r requirements.txt
 ```
 
-This runs, in order:
-
-```
-pip install dlib-bin
-pip install face_recognition --no-deps
-pip install git+https://github.com/ageitgey/face_recognition_models
-pip install "setuptools<81"
-pip install click Pillow numpy opencv-python streamlit
-```
-
-- `dlib-bin` is a prebuilt wheel that provides the same `dlib` module without
-  compiling anything.
-- `face_recognition` is installed with `--no-deps` so pip doesn't try to pull
-  in plain `dlib` as a transitive dependency and undo the point of using
-  `dlib-bin`.
-- `face_recognition_models` and the remaining libraries are installed
-  explicitly since `--no-deps` skipped them.
-- `setuptools<81` is required because `face_recognition_models` imports
-  `pkg_resources` at import time, and recent `setuptools` releases (81+) removed
-  `pkg_resources` entirely. Without this pin you'll hit
-  `ModuleNotFoundError: No module named 'pkg_resources'` even though
-  `face_recognition_models` is installed correctly. (This is a separate pitfall
-  from the `dlib` one above — discovered by actually running this install, not
-  just reading the packages' docs.)
-
-**If you "fix" this by removing `dlib-bin`/`--no-deps` and just running
-`pip install -r requirements.txt`, you will likely reintroduce the slow/failing
-source build of `dlib`.** `requirements.txt` is kept for reference/pinning,
-not as the primary install path.
+That's it — everything (face detection/recognition included) runs on plain
+`opencv-python-headless`, `numpy`, and `streamlit`. No compiled C++
+dependencies, no dlib, nothing platform-specific.
 
 ## Running
 
@@ -84,14 +47,18 @@ larger.
 
 ## How it works
 
-- `detector/logo_matcher.py` — ORB feature matching (`cv2.ORB_create` +
-  `BFMatcher` with Hamming distance) between the reference logo and each
-  sampled frame.
-- `detector/face_matcher.py` — face detection + 128-d embedding comparison via
-  `face_recognition` (dlib-based), downsizing frames 0.5x before detection for
-  speed.
+- `detector/logo_matcher.py` — SIFT feature matching with Lowe's ratio test,
+  verified by RANSAC homography (rejects matches whose keypoints don't agree
+  on a consistent geometric transform, which filters out most background-
+  clutter false positives that plain feature-distance matching lets through).
+- `detector/face_matcher.py` — OpenCV's bundled DNN models: **YuNet** for face
+  detection, **SFace** for the embedding used to compare against the
+  reference face. Both ship as small ONNX files in `detector/models/` and run
+  through `cv2.dnn` — no dlib, no compiling, and generally faster and more
+  accurate on CPU than the HOG-based approach this replaced.
 - `detector/scanner.py` — opens the video with OpenCV, samples frames at the
-  configured rate, and runs every matcher against each sampled frame.
+  configured rate, and runs every matcher against each sampled frame, split
+  across parallel worker processes (see "Performance" below).
 - `detector/ranges.py` — merges individual frame-level detections into
   continuous time ranges, tolerating small gaps (e.g. a brief occlusion).
 - `detector/clipper.py` — cuts each time range (padded a couple seconds on
@@ -116,11 +83,13 @@ terminal.
 
 ## Known MVP limitations
 
-- ORB logo matching is sensitive to scale/rotation/motion blur and will miss
-  small or heavily stylized logos — swap in a YOLO-trained detector for
-  production accuracy.
-- Face matching uses HOG (CPU-friendly, no GPU/CNN model required) — expect
-  more missed detections on small or angled faces than a CNN-based model.
+- SIFT + homography verification handles scale/rotation/blur far better than
+  raw ORB matching, but still isn't trained on the specific logo — a very
+  small, heavily stylized, or badly occluded logo can still be missed. A
+  YOLO-trained detector is the real fix if this matters for a specific client.
+- Face matching (YuNet + SFace) is a strong general-purpose pipeline but
+  isn't tuned to a specific person the way a few-shot fine-tuned model would
+  be — expect occasional misses on extreme angles or very poor lighting.
 - `ffmpeg -c copy` cuts on the nearest keyframe rather than an exact frame
   boundary, so clip start/end may be off by up to a couple seconds; the
   default 2s padding is meant to absorb this.
@@ -130,11 +99,10 @@ terminal.
 ## Performance
 
 `detector/scanner.py` splits the video into contiguous chunks and scans them
-in parallel worker processes (up to `os.cpu_count()`, capped at 8), since the
-dlib HOG face detector is the dominant per-frame cost and this is
-embarrassingly parallel across time ranges. For short clips (below ~20
-sampled frames per worker) it falls back to a single process instead, since
-spawning workers (each re-imports cv2/dlib) isn't worth it for small inputs.
+in parallel worker processes (up to `os.cpu_count()`, capped at 8), since
+per-frame detection cost is embarrassingly parallel across time ranges. For
+short clips (below ~20 sampled frames per worker) it falls back to a single
+process instead, since spawning workers isn't worth it for small inputs.
 Within each worker, frames that aren't being sampled are skipped with
 `cap.grab()` instead of `cap.read()`, avoiding the decode/color-conversion
 cost for frames that would be discarded anyway.
@@ -161,18 +129,9 @@ this app.
 2. Go to [share.streamlit.io](https://share.streamlit.io), sign in, and
    create a new app pointing at your repo, branch, and `app.py` as the main
    file.
-3. That's it — Cloud automatically installs `packages.txt` (system packages)
-   and `requirements.txt` (Python packages) on deploy.
-
-**Why `requirements.txt` differs from the local install scripts**: Streamlit
-Cloud only supports a single `pip install -r requirements.txt` — it can't run
-`install.ps1`/`install.sh`. Plain `dlib` has no prebuilt Linux wheel, so
-`requirements.txt` lets it compile from source instead of using the
-`dlib-bin` shortcut; `packages.txt` supplies the `cmake`/`build-essential`/
-`libopenblas-dev`/`liblapack-dev` it needs to do that. This makes the first
-deploy slow (~10-15 min to compile dlib once), but Cloud caches the
-environment across redeploys as long as `requirements.txt`/`packages.txt`
-don't change. `runtime.txt` pins Python 3.11 so this stays reproducible.
+3. That's it — Cloud installs `packages.txt` (just `ffmpeg`) and
+   `requirements.txt` (`opencv-python-headless`, `numpy`, `streamlit`) on
+   deploy. No compile step, so this should be a fast, uneventful build.
 
 **Known constraints on the free tier** (not fully verifiable without an
 actual deploy — treat as things to check, not guarantees):
@@ -187,19 +146,15 @@ actual deploy — treat as things to check, not guarantees):
   actual upload once deployed, and trim the demo video if it's rejected.
 
 If these limits turn out to be too tight for the client demo, a Docker-based
-host (Render, Railway, Fly.io) gives more control over resources and can run
-the exact `install.sh` sequence in a Dockerfile instead — ask if you want
-that set up as a fallback.
+host (Render, Railway, Fly.io) gives more control over resources.
 
 ### Push to GitHub
 
 ```bash
-git init
 git add .
-git commit -m "Initial commit"
-git remote add origin <your-repo-url>
-git push -u origin main
+git commit -m "Your message"
+git push
 ```
 
-`uploads/`, `outputs/`, and `.venv/` are gitignored, so only source and
-config files get pushed.
+`uploads/`, `outputs/`, and `.venv/` are gitignored, so only source, model
+files, and config get pushed.

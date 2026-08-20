@@ -1,30 +1,3 @@
-# This file is for Streamlit Community Cloud (and any platform that only
-# runs a plain `pip install -r requirements.txt`, with no way to run a
-# multi-step install script).
-#
-# For LOCAL development, use install.ps1 / install.sh instead — see README.md
-# "Installation". They install dlib-bin (a prebuilt wheel) so nothing has to
-# compile from source, which is unreliable on a typical dev machine without
-# cmake and a C++ toolchain already set up.
-#
-# This file takes the opposite approach on purpose: it lets plain `dlib`
-# compile from source, because there is no prebuilt Linux wheel for it on
-# PyPI. That's fine here because packages.txt installs cmake/build-essential/
-# libopenblas-dev/liblapack-dev, so the compile succeeds in Streamlit Cloud's
-# build container — a slow one-time cost (~10-15 min on first deploy, cached
-# afterward) that's the tradeoff for needing only a single, unmodified
-# `pip install -r requirements.txt` step.
-#
-# Do NOT "simplify" this back to dlib-bin — dlib-bin is a differently-named
-# PyPI project, so pip has no way to know it satisfies face_recognition's
-# `dlib` dependency; a single automatic install always ends up wanting real
-# `dlib`, wheel or not.
-setuptools<81
-dlib
-face_recognition
-face_recognition_models
-click
-Pillow
-numpy
 opencv-python-headless
+numpy
 streamlit
