@@ -11,7 +11,16 @@ Detection = namedtuple("Detection", ["frame_time_sec", "match_type", "label", "c
 # Below this many sampled frames per worker, process-spawning overhead (each
 # worker re-imports cv2/dlib and re-loads reference images) isn't worth it.
 MIN_SAMPLES_PER_WORKER = 20
-MAX_WORKERS = 8
+
+# Each worker process loads its own full copy of the face models into memory
+# (~40MB+), regardless of fork/spawn — arguments are always sent to workers
+# via pickling, so this duplication isn't avoidable without a bigger
+# architecture change. Defaults to 1 (no multiprocessing) since Streamlit
+# Community Cloud's free tier is memory-constrained enough that 2+ workers
+# risk an OOM kill under real load, especially with multiple concurrent
+# users on the same deployed instance. Override locally with the
+# BRANDWATCH_MAX_WORKERS env var if running on a machine with RAM to spare.
+MAX_WORKERS = int(os.environ.get("BRANDWATCH_MAX_WORKERS", "1"))
 
 # Force 'fork' where available (Linux/Mac). Under 'spawn' (Windows, or Linux
 # platforms where 'fork' isn't offered), a worker process re-imports whatever

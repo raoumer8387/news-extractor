@@ -98,19 +98,35 @@ terminal.
 
 ## Performance
 
-`detector/scanner.py` splits the video into contiguous chunks and scans them
-in parallel worker processes (up to `os.cpu_count()`, capped at 8), since
-per-frame detection cost is embarrassingly parallel across time ranges. For
-short clips (below ~20 sampled frames per worker) it falls back to a single
-process instead, since spawning workers isn't worth it for small inputs.
-Within each worker, frames that aren't being sampled are skipped with
-`cap.grab()` instead of `cap.read()`, avoiding the decode/color-conversion
-cost for frames that would be discarded anyway.
+`detector/scanner.py` is *capable* of splitting the video into contiguous
+chunks and scanning them in parallel worker processes, since per-frame
+detection cost is embarrassingly parallel across time ranges. **This is
+disabled by default** (`MAX_WORKERS` defaults to 1, controlled by the
+`BRANDWATCH_MAX_WORKERS` env var) — each worker process loads its own full
+copy of the face models into memory (~40MB+, unavoidable since arguments are
+always sent to workers via pickling regardless of fork/spawn), and
+Streamlit Community Cloud's free tier is memory-constrained enough that 2+
+workers risked an OOM kill under real load, especially with multiple
+concurrent users on the same deployed instance. If you're running this
+somewhere with RAM to spare (a beefier host, or just local dev), set
+`BRANDWATCH_MAX_WORKERS=4` (or however many cores you want to use) to get
+the parallel speedup back.
 
-One side effect: with multiple workers, the sidebar's "Scanning HH:MM:SS /
-HH:MM:SS" text is an overall-progress approximation (samples completed so
-far, scaled onto the video's duration) rather than a literal single playhead
-position, since several time ranges are being scanned concurrently.
+Within each worker (parallel or not), frames that aren't being sampled are
+skipped with `cap.grab()` instead of `cap.read()`, avoiding the decode/
+color-conversion cost for frames that would be discarded anyway.
+
+One side effect when running with multiple workers: the sidebar's "Scanning
+HH:MM:SS / HH:MM:SS" text becomes an overall-progress approximation (samples
+completed so far, scaled onto the video's duration) rather than a literal
+single playhead position, since several time ranges are being scanned
+concurrently.
+
+Multiple worker *processes* aren't the only place concurrency matters here —
+if multiple people (e.g. you and a client) use the same deployed instance at
+the same time, Streamlit Cloud runs one shared instance for everyone
+connected, so simultaneous scans compete for the same CPU/memory rather than
+getting isolated resources.
 
 ## Deploying
 
